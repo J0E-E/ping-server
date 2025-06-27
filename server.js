@@ -5,9 +5,13 @@ import { parse } from 'url';
 const wss = new WebSocketServer({port: 3000})
 
 const playerSet = new Map()
+const playerIdConnectionIdMap = new Map()
 
 function broadcastLobbyUpdate() {
 	let players = Array.from(playerSet.values())
+		.map(player => (player.playerData))
+
+	console.log('Lobby Status: ' + JSON.stringify(players))
 	const lobbyUpdateMessage = JSON.stringify({type: 'lobby', action: 'update-players', players})
 
 	wss.clients.forEach((client) => {
@@ -41,8 +45,9 @@ wss.on('connection', (ws, req) => {
 		const player = playerSet.get(ws.id)
 		if (player) {
 			// TODO: handle with a timeout. Allow for reconnect in x amount of time.
-			console.log(`Player Removed: ${player.userName}-${player.playerId}`)
+			console.log(`Player Removed: ${player.playerData.userName}-${player.playerData.playerId}`)
 			playerSet.delete(ws.id)
+			playerIdConnectionIdMap.delete(player.playerData.playerId)
 			broadcastLobbyUpdate()
 		}
 	});
@@ -58,9 +63,34 @@ const messageHandler = (message, ws) => {
 		case 'lobby':
 			lobbyMessageHandler(message, ws)
 			break;
+		case 'match':
+			matchMessageHandler(message, ws)
+			break;
 		default:
 			console.log("NOT SUPPORTED, BITCH!")
 	}
+}
+
+const matchMessageHandler = (message, ws) => {
+	switch (message.action) {
+		case 'request-match':
+			startMatch(message.playerId, message.opponentId)
+			break;
+		default:
+			console.error(`Unsupported Match Action: ${message.action}`)
+	}
+}
+
+const startMatch = (playerId, opponentId) => {
+	let player = getPlayerById(playerId)
+	let opponent = getPlayerById(opponentId)
+
+	if (!player || !opponent) {
+		console.log("Something went wrong starting match: Player or Opponent not found.")
+		return
+	}
+
+	console.log(`Starting match between ${player.playerData.userName} and ${opponent.playerData.userName}`)
 }
 
 const lobbyMessageHandler = (message, ws) => {
@@ -69,7 +99,8 @@ const lobbyMessageHandler = (message, ws) => {
 			// TODO: have legit login/userId/Auth system.
 			let playerId = uuidv4()
 			let playerData = {playerId, userName: message.userName, playerLocation: 'lobby', rating: '12/100'}
-			playerSet.set(message.connectionId, playerData)
+			playerSet.set(ws.id, {playerData, ws})
+			playerIdConnectionIdMap.set(playerId, ws.id)
 			const loggedInMessage = JSON.stringify({type: 'lobby', action: 'logged-in', playerData})
 			ws.send(loggedInMessage)
 			broadcastLobbyUpdate()
@@ -77,4 +108,15 @@ const lobbyMessageHandler = (message, ws) => {
 		default:
 			console.error(`Unsupported Lobby Action: ${message.action}`)
 	}
+}
+
+const getPlayerById = (playerId) => {
+	if (!playerId) {
+		return null
+	}
+	const connectionId = playerIdConnectionIdMap.get(playerId)
+	if (!connectionId) {
+		return null
+	}
+	return playerSet.get(connectionId)
 }
