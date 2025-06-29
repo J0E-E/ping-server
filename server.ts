@@ -1,28 +1,43 @@
-import {WebSocketServer} from 'ws';
+import {WebSocketServer, WebSocket} from 'ws';
 import {v4 as uuidv4} from 'uuid'
-import { parse } from 'url';
+import {Player, PlayerData} from "./src/types/playerTypes";
+import {
+	ClientMessage,
+	ConnectionMessage, LobbyMessage,
+	LobbyUpdateMessage,
+	LoggedInMessage,
+	MatchMessage
+} from "./src/types/messageTypes";
+import Match from "./src/match/Match";
+
+export interface PingWebSocket extends WebSocket {
+	id: string
+}
 
 const wss = new WebSocketServer({port: 3000})
 
-const playerSet = new Map()
-const playerIdConnectionIdMap = new Map()
+const playerSet = new Map<string, Player>()
+
+const playerIdConnectionIdMap = new Map<string, string>()
 
 function broadcastLobbyUpdate() {
 	let players = Array.from(playerSet.values())
 		.map(player => (player.playerData))
 
 	console.log('Lobby Status: ' + JSON.stringify(players))
-	const lobbyUpdateMessage = JSON.stringify({type: 'lobby', action: 'update-players', players})
+	const lobbyUpdateMessage: LobbyUpdateMessage = {type: 'lobby', action: 'update-players', players}
+	const message = JSON.stringify(lobbyUpdateMessage)
 
 	wss.clients.forEach((client) => {
 		if (client.readyState === client.OPEN) {
-			client.send(lobbyUpdateMessage)
+			client.send(message)
 		}
 	})
 }
 
-wss.on('connection', (ws, req) => {
-	const params = new URLSearchParams(parse(req.url, true).query)
+wss.on('connection', (ws: PingWebSocket, req) => {
+	const url = new URL(req.url || '', `http://localhost:3000`)
+	const params = url.searchParams
 
 	let connectionId = params.get('connectionId')
 	if (!connectionId) {
@@ -30,13 +45,14 @@ wss.on('connection', (ws, req) => {
 	}
 	ws.id = connectionId;
 
-	const joinMessage = JSON.stringify({type: "connection", connectionId})
+	const connectionMessage: ConnectionMessage = {type: "connection", connectionId}
+	const message = JSON.stringify(connectionMessage)
 
-	ws.send(joinMessage)
+	ws.send(message)
 	console.log('Client connected.')
 
 	ws.on('message', (data) => {
-		let message = JSON.parse(data.toString())
+		let message = JSON.parse(data.toString()) as ClientMessage
 		messageHandler(message, ws)
 	})
 
@@ -58,7 +74,7 @@ wss.on('connection', (ws, req) => {
 })
 
 
-const messageHandler = (message, ws) => {
+const messageHandler = (message: ClientMessage, ws: PingWebSocket) => {
 	switch (message.type){
 		case 'lobby':
 			lobbyMessageHandler(message, ws)
@@ -71,52 +87,54 @@ const messageHandler = (message, ws) => {
 	}
 }
 
-const matchMessageHandler = (message, ws) => {
+const matchMessageHandler = (message: MatchMessage, ws: PingWebSocket) => {
 	switch (message.action) {
 		case 'request-match':
-			startMatch(message.playerId, message.opponentId)
+			startMatch(message.opponentId, ws)
 			break;
 		default:
 			console.error(`Unsupported Match Action: ${message.action}`)
 	}
 }
 
-const startMatch = (playerId, opponentId) => {
-	let player = getPlayerById(playerId)
+const startMatch = (opponentId: string, ws: PingWebSocket) => {
+	let player = playerSet.get(ws.id)
 	let opponent = getPlayerById(opponentId)
 
 	if (!player || !opponent) {
 		console.log("Something went wrong starting match: Player or Opponent not found.")
 		return
 	}
-
-	console.log(`Starting match between ${player.playerData.userName} and ${opponent.playerData.userName}`)
+	const match = new Match(player, opponent)
 }
 
-const lobbyMessageHandler = (message, ws) => {
-	switch (message.action) {
+const lobbyMessageHandler = (lobbyMessage: LobbyMessage, ws: PingWebSocket) => {
+	switch (lobbyMessage.action) {
 		case 'joining':
 			// TODO: have legit login/userId/Auth system.
 			let playerId = uuidv4()
-			let playerData = {playerId, userName: message.userName, playerLocation: 'lobby', rating: '12/100'}
+			let playerData: PlayerData = {playerId, userName: lobbyMessage.userName, playerLocation: 'lobby', wins: 0, losses: 0}
 			playerSet.set(ws.id, {playerData, ws})
 			playerIdConnectionIdMap.set(playerId, ws.id)
-			const loggedInMessage = JSON.stringify({type: 'lobby', action: 'logged-in', playerData})
-			ws.send(loggedInMessage)
+
+			const loggedInMessage: LoggedInMessage = {type: 'lobby', action: 'logged-in', playerData}
+			const message = JSON.stringify(loggedInMessage)
+
+			ws.send(message)
 			broadcastLobbyUpdate()
 			break;
 		default:
-			console.error(`Unsupported Lobby Action: ${message.action}`)
+			console.error(`Unsupported Lobby Action: ${lobbyMessage.action}`)
 	}
 }
 
-const getPlayerById = (playerId) => {
+const getPlayerById = (playerId: string): Player | undefined => {
 	if (!playerId) {
-		return null
+		return undefined
 	}
 	const connectionId = playerIdConnectionIdMap.get(playerId)
 	if (!connectionId) {
-		return null
+		return undefined
 	}
 	return playerSet.get(connectionId)
 }
