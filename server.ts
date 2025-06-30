@@ -6,9 +6,15 @@ import {
 	ConnectionMessage, LobbyMessage,
 	LobbyUpdateMessage,
 	LoggedInMessage,
-	MatchMessage
+	MatchMessage, MatchRequestedMessage
 } from "./src/types/messageTypes";
 import Match from "./src/match/Match";
+import {
+	createConnectionMessage,
+	createLobbyUpdateMessage,
+	createLoggedInMessage,
+	createMatchRequestedMessage
+} from "./src/messages/messageFactory";
 
 export interface PingWebSocket extends WebSocket {
 	id: string
@@ -24,8 +30,8 @@ function broadcastLobbyUpdate() {
 	let players = Array.from(playerSet.values())
 		.map(player => (player.playerData))
 
-	console.log('Lobby Status: ' + JSON.stringify(players))
-	const lobbyUpdateMessage: LobbyUpdateMessage = {type: 'lobby', action: 'update-players', players}
+	console.log(`Lobby Status - ${players.length} player(s) - ` + JSON.stringify(players.map((player)=> player.userName)))
+	const lobbyUpdateMessage = createLobbyUpdateMessage(players)
 	const message = JSON.stringify(lobbyUpdateMessage)
 
 	wss.clients.forEach((client) => {
@@ -45,7 +51,7 @@ wss.on('connection', (ws: PingWebSocket, req) => {
 	}
 	ws.id = connectionId;
 
-	const connectionMessage: ConnectionMessage = {type: "connection", connectionId}
+	const connectionMessage = createConnectionMessage(connectionId)
 	const message = JSON.stringify(connectionMessage)
 
 	ws.send(message)
@@ -89,18 +95,40 @@ const messageHandler = (message: ClientMessage, ws: PingWebSocket) => {
 
 const matchMessageHandler = (message: MatchMessage, ws: PingWebSocket) => {
 	switch (message.action) {
-		case 'request-match':
-			startMatch(message.opponentId, ws)
-			break;
-		default:
+		case 'request-match': {
+			let player = getPLayerByConnectionId(ws.id)
+			let opponent = getPlayerById(message.opponentId)
+			if (player && opponent && opponent?.ws) {
+				const matchRequestedMessage = createMatchRequestedMessage(player.playerData)
+				opponent.ws.send(JSON.stringify(matchRequestedMessage))
+			}
+			break
+		}
+		case 'accept-match': {
+			const player = getPlayerById(message.playerId)
+			const opponent = getPLayerByConnectionId(ws.id)
+			if (player && opponent) {
+				startMatch(player, opponent)
+			}
+			break
+		}
+		case 'ready-to-play':
+			const player = getPLayerByConnectionId(ws.id)
+			const match = Match.matches.get(message.matchId)
+			if (!player || !match || !match.players.includes(player.playerData.playerId)) {
+				console.error('Invalid player or match for setting ready-to-play.')
+				return
+			}
+			console.log(message.playerType)
+			match.playerReady(message.playerType)
+			break
+		default: {
 			console.error(`Unsupported Match Action: ${message.action}`)
+		}
 	}
 }
 
-const startMatch = (opponentId: string, ws: PingWebSocket) => {
-	let player = playerSet.get(ws.id)
-	let opponent = getPlayerById(opponentId)
-
+const startMatch = (player: Player, opponent: Player) => {
 	if (!player || !opponent) {
 		console.log("Something went wrong starting match: Player or Opponent not found.")
 		return
@@ -116,10 +144,8 @@ const lobbyMessageHandler = (lobbyMessage: LobbyMessage, ws: PingWebSocket) => {
 			let playerData: PlayerData = {playerId, userName: lobbyMessage.userName, playerLocation: 'lobby', wins: 0, losses: 0}
 			playerSet.set(ws.id, {playerData, ws})
 			playerIdConnectionIdMap.set(playerId, ws.id)
-
-			const loggedInMessage: LoggedInMessage = {type: 'lobby', action: 'logged-in', playerData}
+			const loggedInMessage = createLoggedInMessage(playerData)
 			const message = JSON.stringify(loggedInMessage)
-
 			ws.send(message)
 			broadcastLobbyUpdate()
 			break;
@@ -133,6 +159,13 @@ const getPlayerById = (playerId: string): Player | undefined => {
 		return undefined
 	}
 	const connectionId = playerIdConnectionIdMap.get(playerId)
+	if (!connectionId) {
+		return undefined
+	}
+	return playerSet.get(connectionId)
+}
+
+const getPLayerByConnectionId = (connectionId: string): Player | undefined => {
 	if (!connectionId) {
 		return undefined
 	}

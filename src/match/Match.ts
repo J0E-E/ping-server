@@ -1,14 +1,15 @@
-import {Player} from "../types/playerTypes";
+import {Player, PlayerType} from "../types/playerTypes";
 import {PingWebSocket} from "../../server";
 import {v4 as uuidv4} from 'uuid'
 import MatchState from "./MatchState";
-import {MatchInitializedMessage} from "../types/messageTypes";
+import {createMatchAcceptedMessage, createMatchUpdateStateMessage} from "../messages/messageFactory";
 
 export default class Match {
     static matches: Map<string, Match> = new Map()
     matchId: string
     player: Player
     opponent: Player
+    players: string[]
     matchWebSockets: Set<PingWebSocket>
     matchState: MatchState
 
@@ -25,6 +26,7 @@ export default class Match {
         Match.matches.set(this.matchId, this)
         this.player = player
         this.opponent = opponent
+        this.players = [player.playerData.playerId, opponent.playerData.playerId]
         this.matchWebSockets = new Set([player.ws, opponent.ws])
         this.matchState = new MatchState()
 
@@ -48,11 +50,26 @@ export default class Match {
     initializeMatch() {
         console.log(`Match: Starting match between ${this.player.playerData.userName} and ${this.opponent.playerData.userName}. MatchId: ${this.matchId}`)
 
-        const playerInitialization: MatchInitializedMessage = {type: 'match', action: 'match-initialized', matchId: this.matchId, playerType: 'Player', matchState: this.matchState}
-        const opponentInitialization: MatchInitializedMessage = {...playerInitialization, playerType: 'Opponent'}
+        const playerInitialization = createMatchAcceptedMessage(this.matchId, 'Player', this.matchState)
+        const opponentInitialization = createMatchAcceptedMessage(this.matchId, 'Opponent', this.matchState)
 
         this.messagePlayer(playerInitialization)
         this.messageOpponent(opponentInitialization)
+    }
+
+    playerReady(playerType: PlayerType) {
+        switch (playerType) {
+            case "Player":
+                this.matchState.playerReady = true;
+                break
+            case "Opponent":
+                this.matchState.opponentReady = true;
+                break
+            default:
+                console.error("Unsupported PlayerType in Match.playerReady")
+                return
+        }
+        this.broadcastToMatch(createMatchUpdateStateMessage(this.matchState))
     }
 
     messagePlayer(message: any) {
@@ -75,6 +92,7 @@ export default class Match {
         const messageStr = JSON.stringify(message)
         this.matchWebSockets.forEach((ws: PingWebSocket) => {
             if (ws && ws.readyState === ws.OPEN) {
+                console.log(`Sending message: ${messageStr}`)
                 ws.send(messageStr)
             }
         })

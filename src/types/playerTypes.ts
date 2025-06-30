@@ -12,3 +12,5 @@ export interface Player {
     playerData: PlayerData
     ws: PingWebSocket
 }
+
+export type PlayerType = 'Player' | 'Opponent'
