@@ -13,8 +13,8 @@ export default class MatchState {
 
     constructor() {
         // TODO: Have the players confirm ready state.
-        this.playerReady = true
-        this.opponentReady = true
+        this.playerReady = false
+        this.opponentReady = false
         this.ballPosition = { x: 0, y: 0 }
         this.ballVelocity = { x: 0, y: 0 }
         this.playerPaddlePosition = 0
