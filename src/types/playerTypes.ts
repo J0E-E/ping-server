@@ -6,6 +6,7 @@ export interface PlayerData {
     playerLocation: 'lobby' | 'match'
     wins: number
     losses: number
+    xMovement?: number
 }
 
 export interface Player {
@@ -14,3 +15,7 @@ export interface Player {
 }
 
 export type PlayerType = 'Player' | 'Opponent'
+
+export function isValidPlayerType(value: any): value is PlayerType {
+    return value === 'Player' || value === 'Opponent';
+}

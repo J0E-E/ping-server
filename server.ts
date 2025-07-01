@@ -1,6 +1,6 @@
 import {WebSocketServer, WebSocket} from 'ws';
 import {v4 as uuidv4} from 'uuid'
-import {Player, PlayerData} from "./src/types/playerTypes";
+import {isValidPlayerType, Player, PlayerData} from "./src/types/playerTypes";
 import {
 	ClientMessage,
 	ConnectionMessage, LobbyMessage,
@@ -21,6 +21,8 @@ export interface PingWebSocket extends WebSocket {
 }
 
 const wss = new WebSocketServer({port: 3000})
+
+Match.startGameLoop()
 
 const playerSet = new Map<string, Player>()
 
@@ -70,6 +72,8 @@ wss.on('connection', (ws: PingWebSocket, req) => {
 			console.log(`Player Removed: ${player.playerData.userName}-${player.playerData.playerId}`)
 			playerSet.delete(ws.id)
 			playerIdConnectionIdMap.delete(player.playerData.playerId)
+			const match = Match.findMatchByPlayerId(player.playerData.playerId)
+			if (match) Match.endMatch(match.matchId);
 			broadcastLobbyUpdate()
 		}
 	});
@@ -112,20 +116,39 @@ const matchMessageHandler = (message: MatchMessage, ws: PingWebSocket) => {
 			}
 			break
 		}
-		case 'ready-to-play':
+		case 'ready-to-play': {
+			const player = getPLayerByConnectionId(ws.id)
+			const match = Match.matches.get(message.matchId)
+			if (!player || !match || !match.players.includes(player.playerData.playerId) || !isValidPlayerType(message.playerType)) {
+				console.error('Invalid player, match, or playerType for action: ready-to-play.')
+				return
+			}
+			match.playerReady(message.playerType)
+			break
+		}
+		case 'move-paddle': {
 			const player = getPLayerByConnectionId(ws.id)
 			const match = Match.matches.get(message.matchId)
 			if (!player || !match || !match.players.includes(player.playerData.playerId)) {
-				console.error('Invalid player or match for setting ready-to-play.')
+				console.error('Invalid player or match for action: move-paddle.')
 				return
 			}
-			console.log(message.playerType)
-			match.playerReady(message.playerType)
+			player.playerData.xMovement = normalizeXMovement(message.xMovement)
+			console.log(`Moving Paddle: ${new Date().toISOString()}`)
 			break
+		}
 		default: {
 			console.error(`Unsupported Match Action: ${message.action}`)
 		}
 	}
+}
+
+const normalizeXMovement = (xMovement: number): number => {
+	if (xMovement > 0.5) xMovement = 1
+	else if (xMovement < -0.5) xMovement = -1
+	else xMovement = 0
+
+	return xMovement
 }
 
 const startMatch = (player: Player, opponent: Player) => {

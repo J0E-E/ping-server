@@ -16,11 +16,12 @@ export interface LobbyMessage extends BaseClientMessage {
 
 export interface MatchMessage extends BaseClientMessage {
     type: 'match'
-    action: 'request-match' | 'accept-match' | 'ready-to-play'
+    action: 'request-match' | 'accept-match' | 'ready-to-play' | 'move-paddle'
     playerId: string
     opponentId: string
     matchId: string
     playerType: PlayerType
+    xMovement: number
 }
 
 export type ClientMessage = LobbyMessage | MatchMessage
