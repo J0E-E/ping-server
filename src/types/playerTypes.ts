@@ -7,6 +7,7 @@ export interface PlayerData {
     wins: number
     losses: number
     xMovement?: number
+    playerType?: PlayerType
 }
 
 export interface Player {

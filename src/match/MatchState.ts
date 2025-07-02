@@ -1,4 +1,5 @@
 import {Vector2} from "../types/matchTypes";
+import {PlayerType} from "../types/playerTypes";
 
 export default class MatchState {
     playerReady: boolean
@@ -10,6 +11,9 @@ export default class MatchState {
     playerScore: number
     opponentScore: number
     winningScore: number
+    ballPossession: PlayerType | undefined
+    isBallInPlay: boolean
+    winner: PlayerType | undefined
 
     constructor() {
         // TODO: Have the players confirm ready state.
@@ -21,6 +25,9 @@ export default class MatchState {
         this.opponentPaddlePosition = 0
         this.playerScore = 0
         this.opponentScore = 0
-        this.winningScore = 10;
+        this.winningScore = 10
+        this.ballPossession = 'Player'
+        this.isBallInPlay = false
+        this.winner = undefined
     }
 }
