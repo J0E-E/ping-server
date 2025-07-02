@@ -1,10 +1,9 @@
-import {Player, PlayerData, PlayerType} from "../types/playerTypes";
+import {Player, PlayerType} from "../types/playerTypes";
 import {PingWebSocket} from "../../server";
 import {v4 as uuidv4} from 'uuid'
 import MatchState from "./MatchState";
 import {createMatchAcceptedMessage, createMatchUpdateStateMessage} from "../messages/messageFactory";
 import {clearInterval} from "node:timers";
-import {match} from "node:assert";
 
 export default class Match {
     static matches: Map<string, Match> = new Map()
@@ -23,6 +22,7 @@ export default class Match {
     deltaTime: number = 0
     lastBroadcastTime: number = 0
     broadcastInterval: number = 100
+    initialBallVelocity: { x: number, y: number } = {x: 0, y: 15}
 
     constructor(player: Player, opponent: Player) {
         if (!player?.ws || !opponent?.ws) {
@@ -40,6 +40,9 @@ export default class Match {
         this.players = [player.playerData.playerId, opponent.playerData.playerId]
         this.matchWebSockets = new Set([player.ws, opponent.ws])
         this.matchState = new MatchState()
+
+        this.player.playerData.playerType = 'Player'
+        this.opponent.playerData.playerType = 'Opponent'
 
         this.initializeMatch()
     }
@@ -92,13 +95,105 @@ export default class Match {
         if (this.player.playerData.xMovement) this.updatePaddlePosition(this.player)
         if (this.opponent.playerData.xMovement) this.updatePaddlePosition(this.opponent)
 
+        if (!this.matchState.isBallInPlay) this.updateBallStartingPosition()
+        else {
+            this.updateBallPosition()
+            this.checkWallCollisions()
+            this.checkPaddleCollisions()
+            this.checkScoringCondition()
+            this.checkWinCondition()
+        }
+
         if (currentTime - this.lastBroadcastTime >= this.broadcastInterval) {
             this.broadcastToMatch(createMatchUpdateStateMessage(this.matchState))
             this.lastBroadcastTime = currentTime
         }
     }
 
-    updatePaddlePosition(player: Player) {
+    private updateBallPosition() {
+        this.matchState.ballPosition = {
+            x: Math.round((this.matchState.ballPosition.x + (this.matchState.ballVelocity.x * this.deltaTime)) * 100) / 100,
+            y: Math.round((this.matchState.ballPosition.y + (this.matchState.ballVelocity.y * this.deltaTime)) * 100) / 100
+        }
+    }
+
+    private checkWallCollisions() {
+        if (Math.abs(this.matchState.ballPosition.x) >= 24.5) {
+            this.matchState.ballPosition.x = this.matchState.ballPosition.x > 0 ? 24.4 : -24.4
+            this.matchState.ballVelocity.x *= -1
+        }
+    }
+
+    private checkPaddleCollisions() {
+
+        if (Math.abs(this.matchState.ballPosition.y) >= 44.5 && Math.abs(this.matchState.ballPosition.y) <= 45) {
+            let potentialPaddle = this.calculatePaddleBoundaries(this.matchState.ballPosition.y > 0 ? this.matchState.opponentPaddlePosition * -1 : this.matchState.playerPaddlePosition)
+            if (this.matchState.ballPosition.x >= potentialPaddle.min && this.matchState.ballPosition.x <= potentialPaddle.max) {
+                this.matchState.ballPosition.y = this.matchState.ballPosition.y > 0 ? 44.4 : -44.4
+                this.matchState.ballVelocity.y *= -1
+            }
+        }
+    }
+
+    private checkScoringCondition() {
+        if (Math.abs(this.matchState.ballPosition.y) > 45) {
+            const scoringPlayer = this.matchState.ballPosition.y > 0 ? this.player : this.opponent
+            this.matchState.isBallInPlay = false
+            this.scorePoint(scoringPlayer)
+            this.matchState.ballPossession = scoringPlayer.playerData.playerType
+        }
+    }
+
+    private scorePoint(player: Player) {
+        switch (player.playerData.playerType) {
+            case 'Player':
+                this.matchState.playerScore += 1
+                break
+            case 'Opponent':
+                this.matchState.opponentScore += 1
+                break
+            default:
+                return
+        }
+    }
+
+    private checkWinCondition() {
+        if (this.matchState.playerScore === this.matchState.winningScore) {
+            this.matchState.winner = 'Player'
+        }
+        if (this.matchState.opponentScore === this.matchState.winningScore) {
+            this.matchState.winner = 'Opponent'
+        }
+    }
+
+    private calculatePaddleBoundaries(position: number): {min: number, max: number} {
+        return {min: position - 3, max: position +3}
+    }
+
+    private updateBallStartingPosition() {
+
+        this.initializeBallPosition()
+
+        switch (this.matchState.ballPossession) {
+            case "Player":
+                this.matchState.ballPosition = {
+                    x: this.matchState.playerPaddlePosition,
+                    y: this.matchState.ballPosition.y
+                }
+                break
+            case "Opponent":
+                this.matchState.ballPosition = {
+                    x: this.matchState.opponentPaddlePosition * -1,
+                    y: this.matchState.ballPosition.y
+                }
+                break
+            default:
+                console.error("Something went wrong updating ball starting position.")
+        }
+    }
+
+
+    private updatePaddlePosition(player: Player) {
         const isPlayer = player === this.player
         const currentPosition = isPlayer ?
             this.matchState.playerPaddlePosition :
@@ -114,7 +209,7 @@ export default class Match {
             if (isPlayer) {
                 this.matchState.playerPaddlePosition = Math.round(clampedPosition * 100) / 100
             } else {
-                this.matchState.opponentPaddlePosition =  Math.round(clampedPosition * 100) / 100
+                this.matchState.opponentPaddlePosition = Math.round(clampedPosition * 100) / 100
             }
         }
     }
@@ -131,9 +226,11 @@ export default class Match {
         return Match.matches.size
     }
 
-    get MatchId() {return this.matchId}
+    get MatchId() {
+        return this.matchId
+    }
 
-    initializeMatch() {
+    private initializeMatch() {
         console.log(`Match: Starting match between ${this.player.playerData.userName} and ${this.opponent.playerData.userName}. MatchId: ${this.matchId}`)
 
         const playerInitialization = createMatchAcceptedMessage(this.matchId, 'Player', this.matchState)
@@ -141,6 +238,36 @@ export default class Match {
 
         this.messagePlayer(playerInitialization)
         this.messageOpponent(opponentInitialization)
+    }
+
+    private initializeBallPosition() {
+        this.matchState.ballPosition = {x: 0, y: 43 * (this.matchState.ballPossession === 'Player' ? -1 : 1)}
+        console.log("Ball initialized.")
+    }
+
+    private messagePlayer(message: any) {
+        const messageStr = JSON.stringify(message)
+        if (this.player.ws && this.player.ws.readyState === this.player.ws.OPEN) {
+            console.log(`PlayerMessage: ${messageStr}`)
+            this.player.ws.send(messageStr)
+        }
+    }
+
+    private messageOpponent(message: any) {
+        const messageStr = JSON.stringify(message)
+        if (this.opponent.ws && this.opponent.ws.readyState === this.opponent.ws.OPEN) {
+            console.log(`OpponentMessage: ${messageStr}`)
+            this.opponent.ws.send(messageStr)
+        }
+    }
+
+    private broadcastToMatch(message: any) {
+        const messageStr = JSON.stringify(message)
+        this.matchWebSockets.forEach((ws: PingWebSocket) => {
+            if (ws && ws.readyState === ws.OPEN) {
+                ws.send(messageStr)
+            }
+        })
     }
 
     playerReady(playerType: PlayerType) {
@@ -155,33 +282,18 @@ export default class Match {
                 console.error("Unsupported PlayerType in Match.playerReady")
                 return
         }
+
         this.broadcastToMatch(createMatchUpdateStateMessage(this.matchState))
 
         if (this.matchState.playerReady && this.matchState.opponentReady) this.isActive = true
     }
 
-    messagePlayer(message: any) {
-        const messageStr = JSON.stringify(message)
-        if (this.player.ws && this.player.ws.readyState === this.player.ws.OPEN) {
-            console.log(`PlayerMessage: ${messageStr}`)
-            this.player.ws.send(messageStr)
-        }
-    }
-
-    messageOpponent(message: any) {
-        const messageStr = JSON.stringify(message)
-        if (this.opponent.ws && this.opponent.ws.readyState === this.opponent.ws.OPEN) {
-            console.log(`OpponentMessage: ${messageStr}`)
-            this.opponent.ws.send(messageStr)
-        }
-    }
-
-    broadcastToMatch(message: any) {
-        const messageStr = JSON.stringify(message)
-        this.matchWebSockets.forEach((ws: PingWebSocket) => {
-            if (ws && ws.readyState === ws.OPEN) {
-                ws.send(messageStr)
-            }
-        })
+    releaseBall() {
+        const playerWithPossession = this.matchState.ballPossession === 'Player' ? this.player : this.opponent
+        this.matchState.ballVelocity = {
+            x: this.initialBallVelocity.x + (15 * (playerWithPossession.playerData.xMovement || 0) * (this.matchState.ballPossession == 'Player' ? 1 : -1)),
+            y: this.initialBallVelocity.y * (this.matchState.ballPossession == 'Player' ? 1 : -1)}
+        this.matchState.isBallInPlay = true
+        this.matchState.ballPossession = undefined
     }
 }
