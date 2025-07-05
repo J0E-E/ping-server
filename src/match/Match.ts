@@ -141,6 +141,7 @@ export default class Match {
             this.matchState.isBallInPlay = false
             this.scorePoint(scoringPlayer)
             this.matchState.ballPossession = scoringPlayer.playerData.playerType
+            this.initializeBallPosition()
         }
     }
 
@@ -171,8 +172,6 @@ export default class Match {
     }
 
     private updateBallStartingPosition() {
-
-        this.initializeBallPosition()
 
         switch (this.matchState.ballPossession) {
             case "Player":
@@ -285,7 +284,10 @@ export default class Match {
 
         this.broadcastToMatch(createMatchUpdateStateMessage(this.matchState))
 
-        if (this.matchState.playerReady && this.matchState.opponentReady) this.isActive = true
+        if (this.matchState.playerReady && this.matchState.opponentReady) {
+            this.isActive = true
+            this.initializeBallPosition()
+        }
     }
 
     releaseBall() {
