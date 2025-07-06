@@ -5,6 +5,8 @@ import MatchState from "./MatchState";
 import {createMatchAcceptedMessage, createMatchUpdateStateMessage} from "../messages/messageFactory";
 import {clearInterval} from "node:timers";
 
+const MAX_BOUNCE_ANGLE: number = (60 * Math.PI) / 180; // 60 degrees bounce angle max
+
 export default class Match {
     static matches: Map<string, Match> = new Map()
     private static gameLoopInterval: NodeJS.Timeout | null = null
@@ -99,7 +101,7 @@ export default class Match {
         else {
             this.updateBallPosition()
             this.checkWallCollisions()
-            this.checkPaddleCollisions()
+            this.checkAndCalculatePaddleBallCollision()
             this.checkScoringCondition()
             this.checkWinCondition()
         }
@@ -124,15 +126,51 @@ export default class Match {
         }
     }
 
-    private checkPaddleCollisions() {
+    private checkAndCalculatePaddleBallCollision() {
 
         if (Math.abs(this.matchState.ballPosition.y) >= 44.5 && Math.abs(this.matchState.ballPosition.y) <= 45) {
-            let potentialPaddle = this.calculatePaddleBoundaries(this.matchState.ballPosition.y > 0 ? this.matchState.opponentPaddlePosition * -1 : this.matchState.playerPaddlePosition)
-            if (this.matchState.ballPosition.x >= potentialPaddle.min && this.matchState.ballPosition.x <= potentialPaddle.max) {
+            let potentialPaddle = this.calculatePaddleBoundaries(
+                this.matchState.ballPosition.y > 0 ? this.matchState.opponentPaddlePosition * -1 : this.matchState.playerPaddlePosition
+            )
+            if (
+                this.matchState.ballPosition.x >= potentialPaddle.min &&
+                this.matchState.ballPosition.x <= potentialPaddle.max
+            ) {
+                // get a normalized -1 to 1 value for the ball hit location on the paddle.
+                const relativeHitLocation = this.calculateRelativeHit(potentialPaddle)
+                console.log(`Relative Hit Location: ${relativeHitLocation}`)
+                // calculate the new bounce angle.
+                const bounceAngle = relativeHitLocation * MAX_BOUNCE_ANGLE
+                console.log(`Bounce Angle: ${bounceAngle}`)
+
+                // Get ball speed to keep the magnitude.
+                const speed = Math.sqrt(
+                    this.matchState.ballVelocity.x ** 2 +
+                    this.matchState.ballVelocity.y ** 2
+                )
+                console.log(`Speed: ${speed}`)
+
+                // Get new direction: if the ball was going up, now it goes down and vice versa.
+                const direction = this.matchState.ballVelocity.y > 0 ? -1 : 1
+                console.log(`Direction: ${direction}`)
+
+                // Set new velocity components
+                this.matchState.ballVelocity.x = speed * Math.sin(bounceAngle)
+                this.matchState.ballVelocity.y = speed * Math.cos(bounceAngle) * direction
+                console.log(`VeloX: ${speed * Math.sin(bounceAngle)}`)
+                console.log(`VeloY: ${speed * Math.cos(bounceAngle) * direction}`)
+
+                // Adjust ball position slightly, so it doesn't recollide immediately.
                 this.matchState.ballPosition.y = this.matchState.ballPosition.y > 0 ? 44.4 : -44.4
-                this.matchState.ballVelocity.y *= -1
             }
         }
+    }
+
+    private calculateRelativeHit(paddleBounds: {min: number, max: number}) {
+        const ballX = this.matchState.ballPosition.x
+        const midpoint = (paddleBounds.min + paddleBounds.max) / 2
+        const halfWidth = (paddleBounds.max - paddleBounds.min) / 2
+        return Math.max(-1, Math.min(1, (ballX - midpoint) / halfWidth))
     }
 
     private checkScoringCondition() {
