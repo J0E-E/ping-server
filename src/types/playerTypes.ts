@@ -6,6 +6,7 @@ export interface PlayerData {
     playerLocation: 'lobby' | 'match'
     wins: number
     losses: number
+    inMatch?: boolean
     xMovement?: number
     playerType?: PlayerType
 }
