@@ -16,7 +16,7 @@ export interface LobbyMessage extends BaseClientMessage {
 
 export interface MatchMessage extends BaseClientMessage {
     type: 'match'
-    action: 'request-match' | 'accept-match' | 'ready-to-play' | 'move-paddle' | 'release-ball'
+    action: 'request-match' | 'accept-match' | 'ready-to-play' | 'move-paddle' | 'release-ball' | 'end-match'
     playerId: string
     opponentId: string
     matchId: string
@@ -68,6 +68,12 @@ export interface MatchStateUpdateMessage extends BaseServerMessage {
     type: 'match'
     action: 'update-match-state'
     matchState: MatchState
+}
+
+export interface  MatchEndedMessage extends BaseServerMessage {
+    type: 'match'
+    action: 'match-ended'
+    matchId: string
 }
 
 export type ServerMessage = LobbyUpdateMessage | LoggedInMessage | ConnectionMessage | MatchAcceptedMessage

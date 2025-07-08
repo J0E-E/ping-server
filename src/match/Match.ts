@@ -2,7 +2,11 @@ import {Player, PlayerType} from "../types/playerTypes";
 import {PingWebSocket} from "../../server";
 import {v4 as uuidv4} from 'uuid'
 import MatchState from "./MatchState";
-import {createMatchAcceptedMessage, createMatchUpdateStateMessage} from "../messages/messageFactory";
+import {
+    createMatchAcceptedMessage,
+    createMatchEndedMessage,
+    createMatchUpdateStateMessage
+} from "../messages/messageFactory";
 import {clearInterval} from "node:timers";
 
 const MAX_BOUNCE_ANGLE: number = (60 * Math.PI) / 180; // 60 degrees bounce angle max
@@ -25,6 +29,7 @@ export default class Match {
     lastBroadcastTime: number = 0
     broadcastInterval: number = 100
     initialBallVelocity: { x: number, y: number } = {x: 0, y: 15}
+    isPaused: boolean = false;
 
     constructor(player: Player, opponent: Player) {
         if (!player?.ws || !opponent?.ws) {
@@ -35,23 +40,27 @@ export default class Match {
             throw new Error('Cannot create match with same player')
         }
 
+        // get uuid for match and add match to match set.
         this.matchId = uuidv4()
         Match.matches.set(this.matchId, this)
+
+        // set player and opponent to match
         this.player = player
+        this.player.playerData.inMatch = true
+        this.player.playerData.playerType = 'Player'
         this.opponent = opponent
+        this.opponent.playerData.inMatch = true
+        this.opponent.playerData.playerType = 'Opponent'
         this.players = [player.playerData.playerId, opponent.playerData.playerId]
+
         this.matchWebSockets = new Set([player.ws, opponent.ws])
         this.matchState = new MatchState()
-
-        this.player.playerData.playerType = 'Player'
-        this.opponent.playerData.playerType = 'Opponent'
 
         this.initializeMatch()
     }
 
-    static endMatch(matchId: string) {
-        this.matches.delete(matchId)
-        console.log(`Match ended. MatchId: ${matchId}`)
+    public pauseMatch() {
+        this.isPaused = true
     }
 
     static startGameLoop() {
@@ -71,8 +80,18 @@ export default class Match {
         }
     }
 
+    endMatch() {
+        this.player.playerData.inMatch = false
+        this.opponent.playerData.inMatch = false
+        console.log(`Match ended. MatchId: ${this.matchId}`)
+        Match.matches.delete(this.matchId)
+        this.broadcastToMatch(createMatchEndedMessage(this.matchId))
+    }
+
     private static updateAllMatches() {
         this.matches.forEach((match) => {
+            if (match.isPaused) return
+
             match.updateMatch()
         })
     }

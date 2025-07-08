@@ -30,6 +30,7 @@ const playerIdConnectionIdMap = new Map<string, string>()
 
 function broadcastLobbyUpdate() {
     let players = Array.from(playerSet.values())
+        .filter((player) => { return !player.playerData.inMatch})
         .map(player => (player.playerData))
 
     console.log(`Lobby Status - ${players.length} player(s) - ` + JSON.stringify(players.map((player) => player.userName)))
@@ -68,12 +69,21 @@ wss.on('connection', (ws: PingWebSocket, req) => {
         console.log(`Client disconnected. Code: ${code}, Reason: ${reason.toString()}`);
         const player = playerSet.get(ws.id)
         if (player) {
-            // TODO: handle with a timeout. Allow for reconnect in x amount of time.
-            console.log(`Player Removed: ${player.playerData.userName}-${player.playerData.playerId}`)
+            // Remove the player TODO: start a reconnection timeout functionality to allow the user to return in x amount of time.
+            const disconnectedPlayerID = player.playerData.playerId
             playerSet.delete(ws.id)
             playerIdConnectionIdMap.delete(player.playerData.playerId)
-            const match = Match.findMatchByPlayerId(player.playerData.playerId)
-            if (match) Match.endMatch(match.matchId);
+            console.log(`Player Removed: ${player.playerData.userName}-${player.playerData.playerId}`)
+
+            // Check if user was in a match.
+            const match = Match.findMatchByPlayerId(disconnectedPlayerID)
+            if (match) {
+                // pause match. TODO: have the match pause until user reconnects or reconnection times out.
+                match.pauseMatch()
+
+                // end the match.
+                match.endMatch()
+            }
             broadcastLobbyUpdate()
         }
     });
@@ -143,10 +153,20 @@ const matchMessageHandler = (message: MatchMessage, ws: PingWebSocket) => {
             if (!player || !match || player.playerData.playerType != match.matchState.ballPossession) {
                 console.error('Invalid player, match, or playerType for ball possession for action: release-ball.')
                 console.log(`MatchId: ${message.matchId} FoundMatch: ${!!match} BallPossession: ` +
-					`${match?.matchState.ballPossession} Player-PlayerType: ${player?.playerData.playerType}`)
-				return
+                    `${match?.matchState.ballPossession} Player-PlayerType: ${player?.playerData.playerType}`)
+                return
             }
             match.releaseBall()
+            break
+        }
+        case 'end-match': {
+            const match = Match.getMatch(message.matchId)
+            if (!match) {
+                console.error('Invalid match for action: end-match.')
+                return
+            }
+            match.endMatch()
+            broadcastLobbyUpdate()
             break
         }
         default: {
@@ -169,6 +189,7 @@ const startMatch = (player: Player, opponent: Player) => {
         return
     }
     const match = new Match(player, opponent)
+    broadcastLobbyUpdate()
 }
 
 const lobbyMessageHandler = (lobbyMessage: LobbyMessage, ws: PingWebSocket) => {

@@ -3,7 +3,7 @@ import {
     ConnectionMessage,
     LobbyUpdateMessage,
     LoggedInMessage,
-    MatchAcceptedMessage,
+    MatchAcceptedMessage, MatchEndedMessage,
     MatchRequestedMessage, MatchStateUpdateMessage
 } from "../types/messageTypes";
 import MatchState from "../match/MatchState";
@@ -55,5 +55,13 @@ export function createMatchUpdateStateMessage(matchState: MatchState): MatchStat
         type: 'match',
         action: 'update-match-state',
         matchState: matchState
+    }
+}
+
+export function createMatchEndedMessage(matchId: string): MatchEndedMessage {
+    return {
+        type: 'match',
+        action: 'match-ended',
+        matchId: matchId
     }
 }
